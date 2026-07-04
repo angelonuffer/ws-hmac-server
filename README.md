@@ -1,70 +1,70 @@
 # WebSocket HMAC Server
 
-Servidor WebSocket em Node.js focado em troca de mensagens baseadas em texto e roteamento por identificadores (UUIDs) com autenticação via HMAC.
+A Node.js WebSocket server focused on text-based message exchange and routing by identifiers (UUIDs) with HMAC authentication.
 
-## Configurações do Servidor (Variáveis de Ambiente)
+## Server Settings (Environment Variables)
 
-O servidor é configurado através das seguintes variáveis de ambiente:
+The server is configured through the following environment variables:
 
-- `HOST`: Endereço de rede onde o servidor vai rodar (Padrão: `0.0.0.0`).
-- `PORT`: Porta de escuta do servidor (Padrão: `8080`).
-- `SERVER_SECRET`: Chave criptográfica usada para assinar e validar IDs (**Obrigatório**).
-- `ALLOWED_ORIGINS`: Lista de origens permitidas (separadas por vírgula) para proteção de conexões. Suporta wildcards no início (ex: `*.exemplo.com`). Conexões sem Origin ou de origens não listadas são rejeitadas.
-- `MAX_MESSAGE_SIZE`: Limite máximo de caracteres por mensagem (Padrão: `65536`).
+- `HOST`: Network address where the server will run (Default: `0.0.0.0`).
+- `PORT`: Server listening port (Default: `8080`).
+- `SERVER_SECRET`: Cryptographic key used to sign and validate IDs (**Required**).
+- `ALLOWED_ORIGINS`: Comma-separated list of allowed origins for connection protection. Supports wildcards at the beginning (e.g., `*.example.com`). Connections without an Origin header or from unlisted origins are rejected.
+- `MAX_MESSAGE_SIZE`: Maximum character limit per message (Default: `65536`).
 
-## Protocolo de Mensagens
+## Messaging Protocol
 
-Todas as mensagens trafegam como uma única string. A separação de dados é feita por posição (slice).
+All messages travel as a single string. Data separation is done by position (slice).
 
-### Comandos de Controle (Iniciados com `!`)
+### Control Commands (Starting with `!`)
 
-#### Geração de Identidade (`!request_id`)
-O cliente envia `!request_id`.
-O servidor cria um UUID v4, gera uma assinatura HMAC-SHA256 usando o `SERVER_SECRET` e responde com `!credentials<uuid><assinatura>`.
-- `uuid`: 36 caracteres.
-- `assinatura`: HMAC-SHA256 em formato Base64 (aprox. 44 caracteres).
+#### Identity Generation (`!request_id`)
+The client sends `!request_id`.
+The server creates a UUID v4, generates an HMAC-SHA256 signature using the `SERVER_SECRET`, and responds with `!credentials<uuid><signature>`.
+- `uuid`: 36 characters.
+- `signature`: HMAC-SHA256 in Base64 format (approx. 44 characters).
 
-#### Autenticação/Vínculo (`!auth`)
-O cliente envia `!auth<uuid><assinatura>`.
-O servidor valida o par (ID + Assinatura). Se válido, vincula a conexão atual àquele ID.
-- **Regra de Multi-conexão**: Um mesmo ID pode ser validado por múltiplas conexões simultâneas.
+#### Authentication/Binding (`!auth`)
+The client sends `!auth<uuid><signature>`.
+The server validates the pair (ID + Signature). If valid, it binds the current connection to that ID.
+- **Multi-connection Rule**: The same ID can be validated by multiple simultaneous connections.
 
-### Troca de Mensagens Padrão
+### Standard Message Exchange
 
-#### Cliente -> Servidor
-O cliente envia os primeiros 36 caracteres contendo o ID de destino, seguido imediatamente pelo conteúdo da mensagem.
-Formato: `<id_destino><conteúdo_da_mensagem>`
+#### Client -> Server
+The client sends the first 36 characters containing the destination ID, followed immediately by the message content.
+Format: `<destination_id><message_content>`
 
-#### Servidor -> Cliente (Relay)
-O servidor identifica quem enviou a mensagem e a repassa ao destino, substituindo o ID de destino pelo ID de origem.
-Formato: `<id_origem><conteúdo_da_mensagem>`
+#### Server -> Client (Relay)
+The server identifies who sent the message and forwards it to the destination, replacing the destination ID with the source ID.
+Format: `<source_id><message_content>`
 
-**Regras de Relay:**
-- O remetente deve estar autenticado.
-- A mensagem é enviada para todas as conexões ativas vinculadas ao `id_destino`, **exceto** para a conexão que enviou a mensagem (mesmo que ela compartilhe o mesmo ID).
+**Relay Rules:**
+- The sender must be authenticated.
+- The message is sent to all active connections bound to the `destination_id`, **except** for the connection that sent the message (even if it shares the same ID).
 
-### Mensagens de Erro e Aviso
-- `!error<mensagem>`: Enviado pelo servidor em caso de falha na autenticação, comando inválido ou erro de formato.
-- `!notice<mensagem>`: Enviado quando o ID de destino não possui conexões ativas.
+### Error and Warning Messages
+- `!error<message>`: Sent by the server in case of authentication failure, invalid command, or format error.
+- `!notice<message>`: Sent when the destination ID has no active connections.
 
-## Execução
+## Execution
 
-### Requisitos
-- Node.js v18 ou superior.
+### Requirements
+- Node.js v18 or higher.
 
-### Instalação
+### Installation
 ```bash
 npm install
 ```
 
-### Iniciar o Servidor
+### Start the Server
 ```bash
-export SERVER_SECRET="sua_chave_secreta"
-export ALLOWED_ORIGINS="http://seuapp.com,*.exemplo.com"
+export SERVER_SECRET="your_secret_key"
+export ALLOWED_ORIGINS="http://yourapp.com,*.example.com"
 npm start
 ```
 
-### Testes
+### Tests
 ```bash
 npm test
 ```
