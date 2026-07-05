@@ -11,6 +11,7 @@ The server is configured through the following environment variables:
 - `SERVER_SECRET`: Cryptographic key used to sign and validate IDs (**Required**).
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed origins for connection protection. Supports wildcards at the beginning (e.g., `*.example.com`). Connections without an Origin header or from unlisted origins are rejected.
 - `MAX_MESSAGE_SIZE`: Maximum character limit per message (Default: `65536`).
+- `MAX_REQUEST_ID_COUNT`: Maximum number of `!request_id` calls allowed per connection (Default: `10`).
 
 ## Messaging Protocol
 
@@ -20,7 +21,7 @@ All messages travel as a single string. Data separation is done by position (sli
 
 #### Identity Generation (`!request_id`)
 The client sends `!request_id`.
-The server creates a UUID v4, generates an HMAC-SHA256 signature using the `SERVER_SECRET`, and responds with `!credentials<uuid><signature>`.
+The server creates a UUID v4, generates an HMAC-SHA256 signature using the `SERVER_SECRET`, responds with `!credentials<uuid><signature>`, and **automatically binds the connection to this ID**.
 - `uuid`: 36 characters.
 - `signature`: HMAC-SHA256 in Base64 format (approx. 44 characters).
 
