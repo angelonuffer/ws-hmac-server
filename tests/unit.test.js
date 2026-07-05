@@ -113,4 +113,56 @@ describe('Server Unit Tests', () => {
     assert.strictEqual(lastMessage, '!noticeTarget offline');
     server.close();
   });
+
+  test('should bind ID automatically on !request_id', () => {
+    const server = createServer({ SERVER_SECRET, ALLOWED_ORIGINS, PORT: 0 });
+    const ws = new EventEmitter();
+    ws.send = mock.fn();
+    ws.readyState = 1;
+
+    server.emit('connection', ws);
+    ws.emit('message', Buffer.from('!request_id'));
+
+    const response = ws.send.mock.calls[0].arguments[0];
+    const id = response.slice(12, 48);
+    assert.strictEqual(ws.authenticatedId, id);
+    server.close();
+  });
+
+  test('should replace bound ID on subsequent !request_id', () => {
+    const server = createServer({ SERVER_SECRET, ALLOWED_ORIGINS, PORT: 0 });
+    const ws = new EventEmitter();
+    ws.send = mock.fn();
+    ws.readyState = 1;
+
+    server.emit('connection', ws);
+
+    ws.emit('message', Buffer.from('!request_id'));
+    const id1 = ws.send.mock.calls[0].arguments[0].slice(12, 48);
+    assert.strictEqual(ws.authenticatedId, id1);
+
+    ws.emit('message', Buffer.from('!request_id'));
+    const id2 = ws.send.mock.calls[1].arguments[0].slice(12, 48);
+    assert.strictEqual(ws.authenticatedId, id2);
+    assert.notStrictEqual(id1, id2);
+    server.close();
+  });
+
+  test('should enforce MAX_REQUEST_ID_COUNT', () => {
+    const server = createServer({ SERVER_SECRET, ALLOWED_ORIGINS, PORT: 0, MAX_REQUEST_ID_COUNT: 2 });
+    const ws = new EventEmitter();
+    ws.send = mock.fn();
+    ws.readyState = 1;
+
+    server.emit('connection', ws);
+
+    ws.emit('message', Buffer.from('!request_id')); // 1
+    ws.emit('message', Buffer.from('!request_id')); // 2
+    ws.emit('message', Buffer.from('!request_id')); // 3 - should fail
+
+    assert.strictEqual(ws.send.mock.callCount(), 3);
+    const lastMessage = ws.send.mock.calls[2].arguments[0];
+    assert.strictEqual(lastMessage, '!errorRequest limit reached');
+    server.close();
+  });
 });

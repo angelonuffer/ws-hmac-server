@@ -8,6 +8,7 @@ export function createServer(config = {}) {
   const SERVER_SECRET = config.SERVER_SECRET || process.env.SERVER_SECRET;
   const ALLOWED_ORIGINS = config.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS || '';
   const MAX_MESSAGE_SIZE = config.MAX_MESSAGE_SIZE || parseInt(process.env.MAX_MESSAGE_SIZE || '65536', 10);
+  const MAX_REQUEST_ID_COUNT = config.MAX_REQUEST_ID_COUNT || parseInt(process.env.MAX_REQUEST_ID_COUNT || '10', 10);
 
   if (!SERVER_SECRET) {
     throw new Error('SERVER_SECRET is required');
@@ -31,6 +32,22 @@ export function createServer(config = {}) {
     } catch (e) {
       return false;
     }
+  }
+
+  function bindId(ws, id) {
+    if (ws.authenticatedId) {
+      const prevConns = clients.get(ws.authenticatedId);
+      if (prevConns) {
+        prevConns.delete(ws);
+        if (prevConns.size === 0) clients.delete(ws.authenticatedId);
+      }
+    }
+
+    ws.authenticatedId = id;
+    if (!clients.has(id)) {
+      clients.set(id, new Set());
+    }
+    clients.get(id).add(ws);
   }
 
   function isOriginAllowed(origin) {
@@ -73,6 +90,7 @@ export function createServer(config = {}) {
 
   wss.on('connection', (ws) => {
     ws.authenticatedId = null;
+    ws.requestIdCount = 0;
 
     ws.on('message', (data) => {
       const message = data.toString();
@@ -104,27 +122,21 @@ export function createServer(config = {}) {
 
   function handleCommand(ws, message) {
     if (message.startsWith('!request_id')) {
+      if (ws.requestIdCount >= MAX_REQUEST_ID_COUNT) {
+        ws.send('!errorRequest limit reached');
+        return;
+      }
+      ws.requestIdCount++;
       const id = uuidv4();
       const signature = signId(id);
+      bindId(ws, id);
       ws.send(`!credentials${id}${signature}`);
     } else if (message.startsWith('!auth')) {
       const id = message.slice(5, 41);
       const signature = message.slice(41);
 
       if (id.length === 36 && verifySignature(id, signature)) {
-        if (ws.authenticatedId) {
-          const prevConns = clients.get(ws.authenticatedId);
-          if (prevConns) {
-            prevConns.delete(ws);
-            if (prevConns.size === 0) clients.delete(ws.authenticatedId);
-          }
-        }
-
-        ws.authenticatedId = id;
-        if (!clients.has(id)) {
-          clients.set(id, new Set());
-        }
-        clients.get(id).add(ws);
+        bindId(ws, id);
       } else {
         ws.send('!errorInvalid credentials');
       }
