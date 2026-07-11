@@ -51,7 +51,7 @@ describe('Server Unit Tests', () => {
     const sig1 = creds1.slice(36);
 
     ws1.emit('message', Buffer.from(`$${id1}${sig1}`));
-    assert.strictEqual(ws1.authenticatedId, id1);
+    assert.ok(ws1.authenticatedIds.has(id1));
 
     ws2.emit('message', Buffer.from('?'));
     const creds2 = ws2.send.mock.calls[0].arguments[0].slice(1);
@@ -60,10 +60,10 @@ describe('Server Unit Tests', () => {
 
     ws2.emit('message', Buffer.from(`$${id2}${sig2}`));
 
-    ws1.emit('message', Buffer.from(`:${id2}Hello World`));
+    ws1.emit('message', Buffer.from(`:${id1}${id2}Hello World`));
 
     assert.strictEqual(ws2.send.mock.callCount(), 2);
-    assert.strictEqual(ws2.send.mock.calls[1].arguments[0], `:${id1}Hello World`);
+    assert.strictEqual(ws2.send.mock.calls[1].arguments[0], `:${id1}${id2}Hello World`);
     server.close();
   });
 
@@ -86,13 +86,13 @@ describe('Server Unit Tests', () => {
     ws1.emit('message', Buffer.from(`$${id}${sig}`));
     ws2.emit('message', Buffer.from(`$${id}${sig}`));
 
-    ws1.emit('message', Buffer.from(`:${id}Broadcast`));
+    ws1.emit('message', Buffer.from(`:${id}${id}Broadcast`));
 
     const ws1Messages = ws1.send.mock.calls.map(c => c.arguments[0]);
-    assert.ok(!ws1Messages.includes(`:${id}Broadcast`));
+    assert.ok(!ws1Messages.includes(`:${id}${id}Broadcast`));
 
     const ws2Messages = ws2.send.mock.calls.map(c => c.arguments[0]);
-    assert.ok(ws2Messages.includes(`:${id}Broadcast`));
+    assert.ok(ws2Messages.includes(`:${id}${id}Broadcast`));
     server.close();
   });
 
@@ -107,7 +107,7 @@ describe('Server Unit Tests', () => {
 
     server.emit('connection', ws);
     ws.emit('message', Buffer.from(`$${id}${sig}`));
-    ws.emit('message', Buffer.from(`:${'0'.repeat(36)}Test message`));
+    ws.emit('message', Buffer.from(`:${id}${'0'.repeat(36)}Test message`));
 
     const lastMessage = ws.send.mock.calls[ws.send.mock.calls.length - 1].arguments[0];
     assert.strictEqual(lastMessage, '#Target offline');
@@ -125,11 +125,11 @@ describe('Server Unit Tests', () => {
 
     const response = ws.send.mock.calls[0].arguments[0];
     const id = response.slice(1, 37);
-    assert.strictEqual(ws.authenticatedId, id);
+    assert.ok(ws.authenticatedIds.has(id));
     server.close();
   });
 
-  test('should replace bound ID on subsequent ?', () => {
+  test('should allow multiple IDs on subsequent ?', () => {
     const server = createServer({ SERVER_SECRET, ALLOWED_ORIGINS, PORT: 0 });
     const ws = new EventEmitter();
     ws.send = mock.fn();
@@ -139,11 +139,12 @@ describe('Server Unit Tests', () => {
 
     ws.emit('message', Buffer.from('?'));
     const id1 = ws.send.mock.calls[0].arguments[0].slice(1, 37);
-    assert.strictEqual(ws.authenticatedId, id1);
+    assert.ok(ws.authenticatedIds.has(id1));
 
     ws.emit('message', Buffer.from('?'));
     const id2 = ws.send.mock.calls[1].arguments[0].slice(1, 37);
-    assert.strictEqual(ws.authenticatedId, id2);
+    assert.ok(ws.authenticatedIds.has(id1));
+    assert.ok(ws.authenticatedIds.has(id2));
     assert.notStrictEqual(id1, id2);
     server.close();
   });
@@ -163,6 +164,40 @@ describe('Server Unit Tests', () => {
     assert.strictEqual(ws.send.mock.callCount(), 3);
     const lastMessage = ws.send.mock.calls[2].arguments[0];
     assert.strictEqual(lastMessage, '%Request limit reached');
+    server.close();
+  });
+
+  test('should unbind ID with - command', () => {
+    const server = createServer({ SERVER_SECRET, ALLOWED_ORIGINS, PORT: 0 });
+    const ws = new EventEmitter();
+    ws.send = mock.fn();
+    ws.readyState = 1;
+
+    server.emit('connection', ws);
+    ws.emit('message', Buffer.from('?'));
+    const id = ws.send.mock.calls[0].arguments[0].slice(1, 37);
+    assert.ok(ws.authenticatedIds.has(id));
+
+    ws.emit('message', Buffer.from(`-${id}`));
+    assert.ok(!ws.authenticatedIds.has(id));
+    server.close();
+  });
+
+  test('should verify source ID on relay', () => {
+    const server = createServer({ SERVER_SECRET, ALLOWED_ORIGINS, PORT: 0 });
+    const ws = new EventEmitter();
+    ws.send = mock.fn();
+    ws.readyState = 1;
+
+    server.emit('connection', ws);
+    ws.emit('message', Buffer.from('?'));
+    const id1 = ws.send.mock.calls[0].arguments[0].slice(1, 37);
+
+    const fakeId = '0'.repeat(36);
+    ws.emit('message', Buffer.from(`:${fakeId}${id1}Message`));
+
+    const lastMessage = ws.send.mock.calls[ws.send.mock.calls.length - 1].arguments[0];
+    assert.strictEqual(lastMessage, '%Source ID not bound to this connection');
     server.close();
   });
 });

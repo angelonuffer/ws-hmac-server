@@ -35,19 +35,26 @@ export function createServer(config = {}) {
   }
 
   function bindId(ws, id) {
-    if (ws.authenticatedId) {
-      const prevConns = clients.get(ws.authenticatedId);
-      if (prevConns) {
-        prevConns.delete(ws);
-        if (prevConns.size === 0) clients.delete(ws.authenticatedId);
-      }
-    }
+    if (ws.authenticatedIds.has(id)) return;
 
-    ws.authenticatedId = id;
+    ws.authenticatedIds.add(id);
     if (!clients.has(id)) {
       clients.set(id, new Set());
     }
     clients.get(id).add(ws);
+  }
+
+  function unbindId(ws, id) {
+    if (!ws.authenticatedIds.has(id)) return;
+
+    ws.authenticatedIds.delete(id);
+    const conns = clients.get(id);
+    if (conns) {
+      conns.delete(ws);
+      if (conns.size === 0) {
+        clients.delete(id);
+      }
+    }
   }
 
   function isOriginAllowed(origin) {
@@ -89,7 +96,7 @@ export function createServer(config = {}) {
   });
 
   wss.on('connection', (ws) => {
-    ws.authenticatedId = null;
+    ws.authenticatedIds = new Set();
     ws.requestIdCount = 0;
 
     ws.on('message', (data) => {
@@ -108,6 +115,9 @@ export function createServer(config = {}) {
         case '$':
           handleAuth(ws, message);
           break;
+        case '-':
+          handleUnbind(ws, message);
+          break;
         case ':':
           handleRelay(ws, message);
           break;
@@ -117,15 +127,16 @@ export function createServer(config = {}) {
     });
 
     ws.on('close', () => {
-      if (ws.authenticatedId) {
-        const conns = clients.get(ws.authenticatedId);
+      for (const id of ws.authenticatedIds) {
+        const conns = clients.get(id);
         if (conns) {
           conns.delete(ws);
           if (conns.size === 0) {
-            clients.delete(ws.authenticatedId);
+            clients.delete(id);
           }
         }
       }
+      ws.authenticatedIds.clear();
     });
   });
 
@@ -152,19 +163,35 @@ export function createServer(config = {}) {
     }
   }
 
+  function handleUnbind(ws, message) {
+    const id = message.slice(1, 37);
+    if (id.length === 36) {
+      unbindId(ws, id);
+    } else {
+      ws.send('%Invalid ID format');
+    }
+  }
+
   function handleRelay(ws, message) {
-    if (!ws.authenticatedId) {
+    if (ws.authenticatedIds.size === 0) {
       ws.send('%Not authenticated');
       return;
     }
 
-    if (message.length < 37) {
+    if (message.length < 73) {
       ws.send('%Invalid message format');
       return;
     }
 
-    const targetId = message.slice(1, 37);
-    const content = message.slice(37);
+    const sourceId = message.slice(1, 37);
+    const targetId = message.slice(37, 73);
+    const content = message.slice(73);
+
+    if (!ws.authenticatedIds.has(sourceId)) {
+      ws.send('%Source ID not bound to this connection');
+      return;
+    }
+
     const targetConns = clients.get(targetId);
 
     if (!targetConns || targetConns.size === 0) {
@@ -172,7 +199,7 @@ export function createServer(config = {}) {
       return;
     }
 
-    const relayMessage = `:${ws.authenticatedId}${content}`;
+    const relayMessage = `:${sourceId}${targetId}${content}`;
     for (const conn of targetConns) {
       if (conn !== ws && conn.readyState === 1) {
         conn.send(relayMessage);
