@@ -24,21 +24,28 @@ The client sends `?`.
 The server creates a UUID v4, generates an HMAC-SHA256 signature using the `SERVER_SECRET`, responds with `=<uuid><signature>`, and **automatically binds the connection to this ID**.
 - `uuid`: 36 characters.
 - `signature`: HMAC-SHA256 in Base64 format (approx. 44 characters).
+- **Multiple IDs**: A single connection can have multiple IDs bound to it by calling `?` multiple times.
 
 #### Authentication/Binding (`$`)
 The client sends `$<uuid><signature>`.
 The server validates the pair (ID + Signature). If valid, it binds the current connection to that ID.
+- **Multiple IDs**: A single connection can have multiple IDs bound to it.
 - **Multi-connection Rule**: The same ID can be validated by multiple simultaneous connections.
+
+#### Unbinding Identity (`-`)
+The client sends `-<uuid>`.
+The server removes the binding between the current connection and the specified ID.
+- `uuid`: 36 characters.
 
 ### Standard Message Exchange
 
 #### Client -> Server
-The client sends the prefix `:` followed by the 36 characters of the destination ID, and then the message content.
-Format: `:<destination_id><message_content>`
+The client sends the prefix `:` followed by the 36 characters of the source ID (which must be bound to the connection), then the 36 characters of the destination ID, and finally the message content.
+Format: `:<source_id><destination_id><message_content>`
 
 #### Server -> Client (Relay)
-The server identifies who sent the message and forwards it to the destination, replacing the destination ID with the source ID, maintaining the `:` prefix.
-Format: `:<source_id><message_content>`
+The server forwards the message to the destination exactly as received (including source and destination IDs), maintaining the `:` prefix.
+Format: `:<source_id><destination_id><message_content>`
 
 **Relay Rules:**
 - The sender must be authenticated.
