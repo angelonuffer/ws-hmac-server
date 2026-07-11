@@ -96,14 +96,23 @@ export function createServer(config = {}) {
       const message = data.toString();
 
       if (message.length > MAX_MESSAGE_SIZE) {
-        ws.send(`!errorLimit of ${MAX_MESSAGE_SIZE} characters exceeded`);
+        ws.send(`%Limit of ${MAX_MESSAGE_SIZE} characters exceeded`);
         return;
       }
 
-      if (message.startsWith('!')) {
-        handleCommand(ws, message);
-      } else {
-        handleRelay(ws, message);
+      const prefix = message[0];
+      switch (prefix) {
+        case '?':
+          handleRequestId(ws);
+          break;
+        case '$':
+          handleAuth(ws, message);
+          break;
+        case ':':
+          handleRelay(ws, message);
+          break;
+        default:
+          ws.send('%Unknown command or missing prefix');
       }
     });
 
@@ -120,52 +129,50 @@ export function createServer(config = {}) {
     });
   });
 
-  function handleCommand(ws, message) {
-    if (message.startsWith('!request_id')) {
-      if (ws.requestIdCount >= MAX_REQUEST_ID_COUNT) {
-        ws.send('!errorRequest limit reached');
-        return;
-      }
-      ws.requestIdCount++;
-      const id = uuidv4();
-      const signature = signId(id);
-      bindId(ws, id);
-      ws.send(`!credentials${id}${signature}`);
-    } else if (message.startsWith('!auth')) {
-      const id = message.slice(5, 41);
-      const signature = message.slice(41);
+  function handleRequestId(ws) {
+    if (ws.requestIdCount >= MAX_REQUEST_ID_COUNT) {
+      ws.send('%Request limit reached');
+      return;
+    }
+    ws.requestIdCount++;
+    const id = uuidv4();
+    const signature = signId(id);
+    bindId(ws, id);
+    ws.send(`=${id}${signature}`);
+  }
 
-      if (id.length === 36 && verifySignature(id, signature)) {
-        bindId(ws, id);
-      } else {
-        ws.send('!errorInvalid credentials');
-      }
+  function handleAuth(ws, message) {
+    const id = message.slice(1, 37);
+    const signature = message.slice(37);
+
+    if (id.length === 36 && verifySignature(id, signature)) {
+      bindId(ws, id);
     } else {
-      ws.send('!errorUnknown command');
+      ws.send('%Invalid credentials');
     }
   }
 
   function handleRelay(ws, message) {
     if (!ws.authenticatedId) {
-      ws.send('!errorNot authenticated');
+      ws.send('%Not authenticated');
       return;
     }
 
-    if (message.length < 36) {
-      ws.send('!errorInvalid message format');
+    if (message.length < 37) {
+      ws.send('%Invalid message format');
       return;
     }
 
-    const targetId = message.slice(0, 36);
-    const content = message.slice(36);
+    const targetId = message.slice(1, 37);
+    const content = message.slice(37);
     const targetConns = clients.get(targetId);
 
     if (!targetConns || targetConns.size === 0) {
-      ws.send('!noticeTarget offline');
+      ws.send('#Target offline');
       return;
     }
 
-    const relayMessage = `${ws.authenticatedId}${content}`;
+    const relayMessage = `:${ws.authenticatedId}${content}`;
     for (const conn of targetConns) {
       if (conn !== ws && conn.readyState === 1) {
         conn.send(relayMessage);
